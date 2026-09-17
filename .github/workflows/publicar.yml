@@ -1,12 +1,12 @@
 name: Publicar reels
 on:
   schedule:
-    - cron: "3,13,33,43,53 0 * * *"
-    - cron: "3,13,23,33,43 1 * * *"
-    - cron: "3,13,23,33,43,53 17 * * *"
-    - cron: "3,13 18 * * *"
-    - cron: "3,13,23,33,43,53 23 * * *"
-    - cron: "35,40,45,50,55 22 * * *"   # PRUEBA 17:35 (borrar despues)
+    - cron: "2,17,32,47 0 * * *"
+    - cron: "2,17 1 * * *"
+    - cron: "32,47 16 * * *"
+    - cron: "2,17,32,47 17 * * *"
+    - cron: "32,47 22 * * *"
+    - cron: "2,17,32,47 23 * * *"
   workflow_dispatch:
 permissions:
   contents: write
@@ -16,7 +16,7 @@ concurrency:
 jobs:
   publicar:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v5
       - name: Publicar lo que toca
