@@ -5,7 +5,7 @@ Lo sube `python editor.py activar-nube`; no hace falta tocarlo.
 Cada archivo cola/NN.json es un reel: cuando llega su hora lo baja del release "videos",
 lo publica en Instagram con la API oficial y anota el resultado.
 """
-import glob, json, os, random, subprocess, time, urllib.error, urllib.parse, urllib.request
+import glob, json, os, random, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 from datetime import date, datetime, timedelta, timezone
 
 CFG = json.load(open("config.json", encoding="utf-8"))
@@ -13,6 +13,9 @@ TZ = timezone(timedelta(minutes=CFG["utc_offset_min"]))
 FMT = "%Y-%m-%d %H:%M"
 IG_API = "https://graph.instagram.com/v25.0"
 TMP = os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), "videos")
+INTENTOS = 3     # veces que se reintenta un video antes de darlo por perdido
+REINTENTO = 15   # minutos hasta el siguiente intento (si todavia estamos en franja)
+RESCATE = 45     # minutos: pasado eso, un "subiendo" es una corrida que se corto
 
 
 def ahora():
@@ -128,6 +131,43 @@ def esperar_la_hora(objetivo):
 
 
 # ------------------------------------------------------------------ CALENDARIO
+def ya_publicado(d, token):
+    """Antes de reintentar algo que quedo a medias: mirar si en realidad ya habia salido.
+
+    Puede pasar que Instagram publique y la corrida se corte antes de anotarlo. Se compara la
+    primera linea del copy contra las ultimas publicaciones de la cuenta."""
+    primera = (d["caption"].splitlines() or [""])[0][:60].strip()
+    if not primera:
+        return None
+    try:
+        medios = ig(f"{os.environ['IG_ID']}/media", token, {"fields": "id,caption", "limit": "12"}, "GET")
+    except Exception as e:
+        log(f"AVISO: no se pudo revisar lo ya publicado ({e})")
+        return None
+    for m in medios.get("data", []):
+        if primera in (m.get("caption") or ""):
+            return m["id"]
+    return None
+
+
+def rescatar(cola, token):
+    """Los que quedaron trabados en 'subiendo' (corrida cortada) vuelven a la cola."""
+    for d in cola:
+        if d["estado"] != "subiendo":
+            continue
+        desde = datetime.strptime(d.get("intento_en", d["publicar_en"]), FMT)
+        if ahora() - desde < timedelta(minutes=RESCATE):
+            continue
+        media = ya_publicado(d, token)
+        if media:
+            d.update(estado="publicado", ig_media=media, publicado_en=ahora().strftime(FMT), nota="")
+            log(f"{d['num']} ya estaba publicado: se anota y listo")
+        else:
+            d.update(estado="programado", publicar_en=next(huecos_libres(cola, ahora())).strftime(FMT))
+            log(f"{d['num']} quedo a medias. Vuelve a la cola: {d['publicar_en']}")
+        guardar(d, f"rescatar {d['num']}")
+
+
 def franja(t):
     for i, (a, b) in enumerate(CFG["horarios"]):
         if a <= t.strftime("%H:%M") <= b:
@@ -151,6 +191,8 @@ def huecos_libres(cola, desde):
 
 def main():
     cola = [json.load(open(p, encoding="utf-8")) for p in sorted(glob.glob("cola/*.json"))]
+    token = token_vigente()
+    rescatar(cola, token)
     t = ahora()
     margen = timedelta(minutes=CFG.get("espera_maxima", 20))  # se agarra lo que esta por salir, no solo lo vencido
     turno = []
@@ -167,22 +209,37 @@ def main():
         log("Nada que publicar ahora")
         return
     d = min(turno, key=lambda d: d["publicar_en"])  # uno por vez
-    d["estado"] = "subiendo"  # se guarda ANTES de subir: asi nunca se publica dos veces
+    objetivo = datetime.strptime(d["publicar_en"], FMT)
+    d["estado"], d["intento_en"] = "subiendo", ahora().strftime(FMT)  # se guarda ANTES: asi nunca se publica dos veces
+    d["intentos"] = d.get("intentos", 0) + 1
     guardar(d, f"subiendo {d['num']}")
-    log(f"{d['num']} preparando para las {d['publicar_en']}...")
+    log(f"{d['num']} preparando para las {d['publicar_en']} (intento {d['intentos']})")
     try:
-        token = token_vigente()
         contenedor = preparar_reel(d, token)
-        esperar_la_hora(datetime.strptime(d["publicar_en"], FMT))
+        esperar_la_hora(objetivo)
         d["ig_media"] = ig(f"{os.environ['IG_ID']}/media_publish", token, {"creation_id": contenedor})["id"]
         d["estado"], d["publicado_en"], d["nota"] = "publicado", ahora().strftime(FMT), ""
         log(f"{d['num']} publicado {'como reel de prueba' if CFG['reel_de_prueba'] else ''}")
         subprocess.run(["gh", "release", "delete-asset", "videos", d["asset"], "-y"])  # libera espacio
     except Exception as e:
-        d["estado"], d["nota"] = "error subida", str(e)[:500]
-        log(f"{d['num']} ERROR: {e}")
+        media = ya_publicado(d, token)  # pudo fallar despues de publicar
+        if media:
+            d.update(estado="publicado", ig_media=media, publicado_en=ahora().strftime(FMT), nota="")
+            log(f"{d['num']} publicado igual (el error fue despues): {e}")
+        elif d["intentos"] < INTENTOS:
+            pronto = ahora() + timedelta(minutes=REINTENTO)
+            d["estado"] = "programado"
+            d["publicar_en"] = (pronto if franja(pronto) is not None
+                                else next(huecos_libres(cola, ahora()))).strftime(FMT)
+            d["nota"] = f"intento {d['intentos']} fallido: {str(e)[:300]}"
+            log(f"{d['num']} falló: {e}\n  Reintento a las {d['publicar_en']}")
+        else:
+            d["estado"], d["nota"] = "error subida", str(e)[:500]
+            log(f"{d['num']} ERROR definitivo tras {d['intentos']} intentos: {e}")
     buzon("release", "delete-asset", "videos", d["asset"], "-y", falla_ok=True)  # el buzon queda vacio siempre
     guardar(d, f"{d['estado']} {d['num']}")
+    if d["estado"] == "error subida":
+        sys.exit(1)  # que la corrida figure como fallida: GitHub avisa por correo
 
 
 if __name__ == "__main__":
