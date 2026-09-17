@@ -6,6 +6,7 @@ on:
     - cron: "3,13,23,33,43,53 17 * * *"
     - cron: "3,13 18 * * *"
     - cron: "3,13,23,33,43,53 23 * * *"
+    - cron: "35,40,45,50,55 22 * * *"   # PRUEBA 17:35 (borrar despues)
   workflow_dispatch:
 permissions:
   contents: write
