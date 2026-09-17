@@ -16,5 +16,7 @@
   "utc_offset_min": -300,
   "reel_de_prueba": true,
   "paso_a_seguidores": "MANUAL",
-  "atraso_maximo": 120
+  "atraso_maximo": 120,
+  "espera_maxima": 20,
+  "buzon": "agencygang/reels-buzon"
 }
