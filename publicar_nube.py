@@ -88,30 +88,43 @@ def token_vigente():
         return token
 
 
-def subir_reel(d, token):
+def buzon(*args, falla_ok=False):
+    """Comandos sobre el repo publico temporal, con el token que puede escribir en el."""
+    return subprocess.run(["gh", *args, "-R", CFG["buzon"]], check=not falla_ok,
+                          env=dict(os.environ, GH_TOKEN=os.environ["GH_PAT"]), capture_output=True)
+
+
+def preparar_reel(d, token):
+    """Deja el video procesado y listo en Instagram, sin publicarlo todavia. Devuelve el contenedor.
+
+    Instagram no acepta que le mandemos el archivo (eso es solo con Facebook Login): tiene que descargarlo
+    el mismo de una URL publica, asi que el video pasa unos minutos por el buzon y despues se borra."""
     os.makedirs(TMP, exist_ok=True)
     video = os.path.join(TMP, d["asset"])
     subprocess.run(["gh", "release", "download", "videos", "-p", d["asset"], "-D", TMP, "--clobber"], check=True)
-    datos = {"media_type": "REELS", "upload_type": "resumable", "caption": d["caption"]}
+    buzon("release", "upload", "videos", video, "--clobber")
+    url = f"https://github.com/{CFG['buzon']}/releases/download/videos/{d['asset']}"
+    datos = {"media_type": "REELS", "video_url": url, "caption": d["caption"]}
     if CFG["reel_de_prueba"]:
         datos["trial_params"] = json.dumps({"graduation_strategy": CFG["paso_a_seguidores"]})
-    ig_id = os.environ["IG_ID"]
-    contenedor = ig(f"{ig_id}/media", token, datos)["id"]
-    tam = os.path.getsize(video)
-    with open(video, "rb") as f:
-        abrir(urllib.request.Request(f"https://rupload.facebook.com/ig-api-upload/v25.0/{contenedor}", data=f, method="POST",
-                                     headers={"Authorization": f"OAuth {token}", "offset": "0", "file_size": str(tam),
-                                              "Content-Length": str(tam)}), timeout=1800)
-    for _ in range(90):  # hasta 15 min procesando
+    contenedor = ig(f"{os.environ['IG_ID']}/media", token, datos)["id"]
+    for _ in range(90):  # hasta 15 min descargando y procesando
         r = ig(contenedor, token, {"fields": "status_code,status"}, "GET")
         if r.get("status_code") == "FINISHED":
-            break
+            return contenedor
         if r.get("status_code") in ("ERROR", "EXPIRED"):
             raise RuntimeError(f"Instagram no pudo procesar el video: {r.get('status') or r['status_code']}")
         time.sleep(10)
-    else:
-        raise RuntimeError("Instagram tardo demasiado procesando el video")
-    return ig(f"{ig_id}/media_publish", token, {"creation_id": contenedor})["id"]
+    raise RuntimeError("Instagram tardo demasiado procesando el video")
+
+
+def esperar_la_hora(objetivo):
+    """La orden final se da al segundo: GitHub arranca tarde, pero la publicacion sale puntual."""
+    falta = (objetivo - ahora()).total_seconds()
+    if falta <= 0:
+        return
+    log(f"Video listo. Esperando {falta / 60:.1f} min para publicar a las {objetivo:%H:%M}")
+    time.sleep(falta)
 
 
 # ------------------------------------------------------------------ CALENDARIO
@@ -139,9 +152,10 @@ def huecos_libres(cola, desde):
 def main():
     cola = [json.load(open(p, encoding="utf-8")) for p in sorted(glob.glob("cola/*.json"))]
     t = ahora()
+    margen = timedelta(minutes=CFG.get("espera_maxima", 20))  # se agarra lo que esta por salir, no solo lo vencido
     turno = []
     for d in cola:
-        if d["estado"] != "programado" or datetime.strptime(d["publicar_en"], FMT) > t:
+        if d["estado"] != "programado" or datetime.strptime(d["publicar_en"], FMT) > t + margen:
             continue
         if t - datetime.strptime(d["publicar_en"], FMT) > timedelta(minutes=CFG["atraso_maximo"]):
             d["publicar_en"] = next(huecos_libres(cola, t)).strftime(FMT)
@@ -155,15 +169,19 @@ def main():
     d = min(turno, key=lambda d: d["publicar_en"])  # uno por vez
     d["estado"] = "subiendo"  # se guarda ANTES de subir: asi nunca se publica dos veces
     guardar(d, f"subiendo {d['num']}")
-    log(f"{d['num']} subiendo a Instagram...")
+    log(f"{d['num']} preparando para las {d['publicar_en']}...")
     try:
-        d["ig_media"] = subir_reel(d, token_vigente())
+        token = token_vigente()
+        contenedor = preparar_reel(d, token)
+        esperar_la_hora(datetime.strptime(d["publicar_en"], FMT))
+        d["ig_media"] = ig(f"{os.environ['IG_ID']}/media_publish", token, {"creation_id": contenedor})["id"]
         d["estado"], d["publicado_en"], d["nota"] = "publicado", ahora().strftime(FMT), ""
         log(f"{d['num']} publicado {'como reel de prueba' if CFG['reel_de_prueba'] else ''}")
         subprocess.run(["gh", "release", "delete-asset", "videos", d["asset"], "-y"])  # libera espacio
     except Exception as e:
         d["estado"], d["nota"] = "error subida", str(e)[:500]
         log(f"{d['num']} ERROR: {e}")
+    buzon("release", "delete-asset", "videos", d["asset"], "-y", falla_ok=True)  # el buzon queda vacio siempre
     guardar(d, f"{d['estado']} {d['num']}")
 
 
