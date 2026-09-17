@@ -1,0 +1,32 @@
+name: Publicar reels
+on:
+  schedule:
+    - cron: "3,13,33,43,53 0 * * *"
+    - cron: "3,13,23,33,43 1 * * *"
+    - cron: "3,13,23,33,43,53 17 * * *"
+    - cron: "3,13 18 * * *"
+    - cron: "3,13,23,33,43,53 23 * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: publicar
+  cancel-in-progress: false
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - name: Publicar lo que toca
+        env:
+          IG_TOKEN: ${{ secrets.IG_TOKEN }}
+          IG_ID: ${{ secrets.IG_ID }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          git config user.name "publicador"
+          git config user.email "publicador@users.noreply.github.com"
+          mkdir -p cola
+          python3 publicar_nube.py
