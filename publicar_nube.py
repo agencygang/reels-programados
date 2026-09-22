@@ -242,5 +242,61 @@ def main():
         sys.exit(1)  # que la corrida figure como fallida: GitHub avisa por correo
 
 
+# ------------------------------------------------------------------ PAGINA DEL CALENDARIO
+def gh_api(ruta, datos=None, metodo=None):
+    req = urllib.request.Request(f"https://api.github.com/{ruta}", method=metodo,
+                                 data=json.dumps(datos).encode() if datos is not None else None,
+                                 headers={"Authorization": f"Bearer {os.environ['GH_PAT']}",
+                                          "Accept": "application/vnd.github+json", "User-Agent": "publicador"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.loads(r.read().decode() or "{}")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise RuntimeError(f"GitHub {e.code}: {e.read().decode(errors='replace')[:200]}") from None
+
+
+def actualizar_pagina():
+    """Rehace el calendario del celular (repo publico con GitHub Pages) si algo cambio.
+
+    La PC deja en calendario/ lo que no esta en la cola: el titulo en dos lineas, la duracion y la miniatura."""
+    import base64
+    import pagina_calendario as pc
+    if not os.path.exists("calendario/info.json"):
+        return
+    info = json.load(open("calendario/info.json", encoding="utf-8"))
+    reels = []
+    for p in sorted(glob.glob("cola/*.json")):
+        d = json.load(open(p, encoding="utf-8"))
+        extra = {}
+        if os.path.exists(f"calendario/{d['num']}.json"):
+            extra = json.load(open(f"calendario/{d['num']}.json", encoding="utf-8"))
+            if extra.get("asset") != d["asset"]:  # es de un reel viejo con el mismo numero
+                extra = {}
+        thumb = ""
+        if extra and os.path.exists(f"calendario/{d['num']}.jpg"):
+            thumb = "data:image/jpeg;base64," + base64.b64encode(open(f"calendario/{d['num']}.jpg", "rb").read()).decode()
+        reels.append({"num": d["num"], "linea1": extra.get("linea1", d["titulo"]), "linea2": extra.get("linea2", ""),
+                      "copy": d["caption"], "estado": d["estado"], "publicar_en": d["publicar_en"],
+                      "duracion": extra.get("duracion", ""), "thumb": thumb})
+    pagina, huella = pc.armar(reels, info["cuenta"], CFG["horarios"], ahora())
+    actual = gh_api(f"repos/{info['pagina']}/contents/index.html")
+    if actual and pc.huella_de(base64.b64decode(actual["content"]).decode()) == huella:
+        return
+    datos = {"message": "calendario actualizado", "content": base64.b64encode(pagina.encode()).decode()}
+    if actual:
+        datos["sha"] = actual["sha"]
+    gh_api(f"repos/{info['pagina']}/contents/index.html", datos, "PUT")
+    log("Calendario del celular actualizado")
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:  # tambien cuando algo fallo: la pagina tiene que mostrar el error
+        try:
+            subprocess.run(["git", "pull", "-q", "--rebase"])  # por si otra corrida cambio la cola mientras tanto
+            actualizar_pagina()
+        except Exception as e:
+            log(f"AVISO: no se pudo actualizar el calendario del celular ({e})")
