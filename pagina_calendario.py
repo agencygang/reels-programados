@@ -72,17 +72,29 @@ def armar(reels, cuenta, horarios, actualizado):
     en_cola = sum(1 for _, r in conf if r["estado"] in EN_COLA)
     proxima = next((t for t, r in conf if r["estado"] in EN_COLA[:2]), None)
 
-    dias = []
+    dias = []  # (fecha, tarjetas, todo publicado)
     for t, r in conf:
         if not dias or t.date() != dias[-1][0]:
-            dias.append((t.date(), []))
+            dias.append((t.date(), [], True))
         dias[-1][1].append(tarjeta(r, t, horarios))
+        if r["estado"] != "publicado":
+            dias[-1] = (dias[-1][0], dias[-1][1], False)
 
     # "Hoy" y "Mañana" los pone el celular al abrir la pagina: asi no quedan viejos entre una corrida y otra
-    bloques = [f"""    <section class="dia">
+    def seccion(fecha, tarjetas):
+        return f"""    <section class="dia">
       <h2>{dia_largo(fecha)}<span class="relativo" data-fecha="{fecha.isoformat()}"></span></h2>
 {chr(10).join(tarjetas)}
-    </section>""" for fecha, tarjetas in dias]
+    </section>"""
+    # arriba lo que falta salir; los dias ya publicados completos van al final, plegados y del mas nuevo al mas viejo
+    bloques = [seccion(f, ts) for f, ts, listo in dias if not listo]
+    archivo = [(f, ts) for f, ts, listo in dias if listo][::-1]
+    if archivo:
+        n = sum(len(ts) for _, ts in archivo)
+        bloques.append(f"""    <details class="archivo">
+      <summary>Ya publicados<span class="relativo">{n} reels</span></summary>
+{chr(10).join(seccion(f, ts) for f, ts in archivo)}
+    </details>""")
     if sin_fecha:
         tarjetas = "\n".join(tarjeta(r, None, horarios) for r in sin_fecha)
         bloques.append(f"""    <section class="dia pendiente">
@@ -217,6 +229,17 @@ PAGINA = """<!doctype html>
   .copy {{ margin: 0 0 7px; font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; }}
   .pie {{ margin: 0; font-size: 11.5px; color: var(--muted); }}
   .num {{ font-family: "IBM Plex Mono", monospace; color: var(--ink); }}
+  .archivo {{ margin-top: 34px; }}
+  .archivo summary {{
+    font-family: "Bricolage Grotesque", system-ui, sans-serif; font-weight: 600; font-size: 15px;
+    cursor: pointer; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 12px; display: flex; justify-content: space-between; align-items: baseline;
+    list-style: none;
+  }}
+  .archivo summary::-webkit-details-marker {{ display: none; }}
+  .archivo summary::before {{ content: "▸"; margin-right: 8px; color: var(--muted); }}
+  .archivo[open] summary::before {{ content: "▾"; }}
+  .archivo summary .relativo {{ margin-left: auto; }}
   footer {{ margin-top: 34px; font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 14px; }}
 </style>
 </head>
