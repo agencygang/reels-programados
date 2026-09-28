@@ -272,6 +272,26 @@ PAGINA = """<!doctype html>
       el.textContent = el.dataset.fecha === hoy ? "Hoy" : el.dataset.fecha === manana ? "Mañana" : "";
     }});
   }})();
+  // Se refresca sola: compara su huella con la publicada y, si hay una mas nueva, se recarga
+  // saltando la cache del celular (al abrirla, al volver a la pestana y cada 2 minutos).
+  (function () {{
+    var c = document.firstChild, m = c && c.nodeType === 8 && /huella:(\\w+)/.exec(c.data);
+    var mia = m ? m[1] : "";
+    function revisar() {{
+      fetch(location.pathname + "?t=" + Date.now(), {{ cache: "no-store" }})
+        .then(function (r) {{ return r.ok ? r.text() : ""; }})
+        .then(function (t) {{
+          var n = /huella:(\\w+)/.exec(t);
+          if (!n || n[1] === mia) return;
+          try {{ if (sessionStorage.getItem("recargada") === n[1]) return; sessionStorage.setItem("recargada", n[1]); }} catch (e) {{}}
+          location.replace(location.pathname + "?v=" + n[1]);
+        }})
+        .catch(function () {{}});
+    }}
+    revisar();
+    setInterval(function () {{ if (!document.hidden) revisar(); }}, 120000);
+    document.addEventListener("visibilitychange", function () {{ if (!document.hidden) revisar(); }});
+  }})();
 </script>
 </body>
 </html>
