@@ -27,7 +27,7 @@ EN_COLA = ("en la nube", "programado", "subiendo")
 def franja(t, horarios):
     for i, (a, b) in enumerate(horarios):
         if a <= t.strftime("%H:%M") <= b:
-            return ["Mediodía", "Tarde", "Noche"][i] if i < 3 else f"Franja {i + 1}"
+            return "Mediodía" if a < "14:00" else "Media tarde" if a < "17:00" else "Tarde" if a < "19:30" else "Noche"
     return "Fuera de franja"
 
 
