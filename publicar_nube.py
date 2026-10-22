@@ -279,7 +279,7 @@ def actualizar_pagina():
             thumb = "data:image/jpeg;base64," + base64.b64encode(open(f"calendario/{d['num']}.jpg", "rb").read()).decode()
         reels.append({"num": d["num"], "linea1": extra.get("linea1", d["titulo"]), "linea2": extra.get("linea2", ""),
                       "copy": d["caption"], "estado": d["estado"], "publicar_en": d["publicar_en"],
-                      "duracion": extra.get("duracion", ""), "thumb": thumb})
+                      "duracion": extra.get("duracion", ""), "thumb": thumb, "propio": extra.get("propio", False)})
     pagina, huella = pc.armar(reels, info["cuenta"], CFG["horarios"], ahora())
     actual = gh_api(f"repos/{info['pagina']}/contents/index.html")
     if actual and pc.huella_de(base64.b64decode(actual["content"]).decode()) == huella:
