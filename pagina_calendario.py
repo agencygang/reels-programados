@@ -44,15 +44,18 @@ def tarjeta(r, t, horarios):
     copy = html.escape(r["copy"]).replace("\n", "<br>")
     img = (f'<img class="thumb" src="{r["thumb"]}" alt="">' if r.get("thumb")
            else '<div class="thumb thumb-vacio">sin video</div>')
-    hora = (f'<span class="hora">{hora_am_pm(t)}</span><span class="franja">{franja(t, horarios)}</span>'
+    propio = r.get("propio")
+    nombre = "★ Tu video" if propio else franja(t, horarios) if t else ""
+    hora = (f'<span class="hora">{hora_am_pm(t)}</span><span class="franja">{nombre}</span>'
             if t else '<span class="hora hora-vacia">—</span>')
-    return f"""      <article class="reel">
+    pie = f"tu video · reel de prueba · {r.get('duracion', '')} s" if propio else f"reel de prueba · original {r.get('duracion', '')}"
+    return f"""      <article class="reel{' propio' if propio else ''}">
         {img}
         <div class="datos">
           <div class="cabecera">{hora}<span class="pill {color}">{etiqueta}</span></div>
           <h3>{html.escape(r['linea1'].strip())} <em>{html.escape(r['linea2'].strip())}</em></h3>
           <p class="copy">{copy}</p>
-          <p class="pie"><span class="num">#{r['num']}</span> reel de prueba · original {r.get('duracion', '')}</p>
+          <p class="pie"><span class="num">#{r['num']}</span> {pie}</p>
         </div>
       </article>"""
 
@@ -213,6 +216,8 @@ PAGINA = """<!doctype html>
   }}
   .hora-vacia {{ color: var(--muted); }}
   .franja {{ font-size: 11.5px; color: var(--muted); }}
+  .reel.propio {{ border: 2px solid var(--accent); }}
+  .propio .franja {{ color: var(--accent); font-weight: 600; }}
   .pill {{
     margin-left: auto; font-size: 10.5px; font-weight: 600; letter-spacing: .05em;
     text-transform: uppercase; padding: 3px 8px; border-radius: 999px; white-space: nowrap;
