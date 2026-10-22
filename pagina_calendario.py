@@ -28,7 +28,7 @@ def franja(t, horarios):
     for i, (a, b) in enumerate(horarios):
         if a <= t.strftime("%H:%M") <= b:
             return "Mediodía" if a < "14:00" else "Media tarde" if a < "17:00" else "Tarde" if a < "19:30" else "Noche"
-    return "Fuera de franja"
+    return "Tu video"  # fuera de las franjas de reaccion solo van los videos propios (HORAS_PROPIAS)
 
 
 def dia_largo(d):
